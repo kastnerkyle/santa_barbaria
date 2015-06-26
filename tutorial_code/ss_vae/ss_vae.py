@@ -86,7 +86,7 @@ if not os.path.exists(save_path):
     fit_function = theano.function([X_sym, y_sym], [nll, kl, err, nll + kl],
                                    updates=updates)
     predict_function = theano.function([X_sym], [y_pred])
-    encode_function = theano.function([X_sym], [code_mu, code_log_sigma])
+    encode_function = theano.function([X_sym, y_sym], [code_mu, code_log_sigma])
     # Need both due to tensor.switch, but only one should ever be used
     decode_function = theano.function([samp, y_sym, y_pred], [out])
     checkpoint_dict = {}
@@ -110,7 +110,7 @@ def status_func(status_number, epoch_number, epoch_results):
 epoch_results = iterate_function(fit_function, [X, y], minibatch_size,
                                  list_of_output_names=["nll", "kl", "err",
                                                        "cost"],
-                                 n_epochs=2000,
+                                 n_epochs=1000,
                                  status_func=status_func,
                                  previous_epoch_results=previous_epoch_results,
                                  shuffle=True,

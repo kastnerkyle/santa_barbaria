@@ -508,7 +508,7 @@ def print_and_checkpoint_status_func(save_path, checkpoint_dict, epoch_results):
 
 def make_minibatch(arg, start, stop):
     """ Does not handle off-size minibatches """
-    return arg[start:stop]
+    return [arg[start:stop]]
 
 
 def make_masked_minibatch(arg, start, stop):
