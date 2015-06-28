@@ -33,11 +33,9 @@ x_l1_enc = softplus_layer([X_sym], graph, 'x_l1_enc', n_enc_layer[0],
 x_l2_enc = softplus_layer([x_l1_enc], graph, 'x_l2_enc',  n_enc_layer[1],
                           random_state)
 
-# switch between labeled and unlabeled - passing y_sym = [-1, ..., -1]
-y_clamp = switch_wrap(tensor.any(tensor.ge(y_sym, 0)), y_sym, y_pred, 'y_clamp')
 
 # combined q(y | x) and partial q(z | x) for q(z | y, x)
-l3_enc = softplus_layer([x_l2_enc, y_clamp], graph, 'l3_enc', n_enc_layer[2],
+l3_enc = softplus_layer([x_l2_enc, y_sym], graph, 'l3_enc', n_enc_layer[2],
                         random_state)
 l4_enc = softplus_layer([l3_enc], graph, 'l4_enc', n_enc_layer[3],
                         random_state)
@@ -48,7 +46,7 @@ samp = gaussian_log_sample_layer([code_mu], [code_log_sigma], 'samp',
                                  random_state)
 
 # decode path aka p for labeled data
-l1_dec = softplus_layer([samp, y_clamp], graph, 'l1_dec',  n_dec_layer[0],
+l1_dec = softplus_layer([samp, y_sym], graph, 'l1_dec',  n_dec_layer[0],
                         random_state)
 l2_dec = softplus_layer([l1_dec], graph, 'l2_dec', n_dec_layer[1], random_state)
 l3_dec = softplus_layer([l2_dec], graph, 'l3_dec', n_dec_layer[2], random_state)
@@ -68,14 +66,9 @@ base_cost = -1 * (-nll - kl)
 
 # -log q(y | x) is nll already
 alpha = 0.1
-labeled_cost = base_cost + alpha * err
-unlabeled_cost = base_cost
+cost = base_cost + alpha * err
 
-# switch between labeled and unlabeled - passing y_sym = [-1, ..., -1]
-cost = tensor.switch(tensor.any(tensor.ge(y_sym, 0)), labeled_cost,
-                     unlabeled_cost)
 params, grads = get_params_and_grads(graph, cost)
-
 learning_rate = 0.0003
 opt = adam(params)
 updates = opt.updates(params, grads, learning_rate)
@@ -83,12 +76,13 @@ updates = opt.updates(params, grads, learning_rate)
 # Checkpointing
 save_path = "serialized_ss_vae.pkl"
 if not os.path.exists(save_path):
-    fit_function = theano.function([X_sym, y_sym], [nll, kl, err, nll + kl],
+    fit_function = theano.function([X_sym, y_sym], [nll, kl, nll + kl],
                                    updates=updates)
     predict_function = theano.function([X_sym], [y_pred])
-    encode_function = theano.function([X_sym, y_sym], [code_mu, code_log_sigma])
+    encode_function = theano.function([X_sym, y_sym], [code_mu, code_log_sigma],
+                                      on_unused_input='warn')
     # Need both due to tensor.switch, but only one should ever be used
-    decode_function = theano.function([samp, y_sym, y_pred], [out])
+    decode_function = theano.function([samp, y_sym], [out])
     checkpoint_dict = {}
     checkpoint_dict["fit_function"] = fit_function
     checkpoint_dict["predict_function"] = predict_function
@@ -108,9 +102,8 @@ def status_func(status_number, epoch_number, epoch_results):
     print_and_checkpoint_status_func(save_path, checkpoint_dict, epoch_results)
 
 epoch_results = iterate_function(fit_function, [X, y], minibatch_size,
-                                 list_of_output_names=["nll", "kl", "err",
-                                                       "cost"],
-                                 n_epochs=1000,
+                                 list_of_output_names=["nll", "kl", "cost"],
+                                 n_epochs=2000,
                                  status_func=status_func,
                                  previous_epoch_results=previous_epoch_results,
                                  shuffle=True,

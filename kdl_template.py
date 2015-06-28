@@ -230,7 +230,7 @@ def make_character_level_from_text(text):
 
     # Remove blank lines
     cleaned = [mapper_func(t) for t in text if t != ""]
-    return cleaned, mapper_func, inverse_mapper_func
+    return cleaned, mapper_func, inverse_mapper_func, mapper
 
 
 def fetch_lovecraft():
@@ -457,23 +457,32 @@ def path_between_points(start, stop, n_steps=100, dtype=theano.config.floatX):
     return steps.astype(dtype)
 
 
-def minibatch_indices(X, minibatch_size):
-    minibatch_indices = np.arange(0, len(X), minibatch_size)
-    minibatch_indices = np.asarray(list(minibatch_indices) + [len(X)])
+def minibatch_indices(itr, minibatch_size):
+    minibatch_indices = np.arange(0, len(itr), minibatch_size)
+    minibatch_indices = np.asarray(list(minibatch_indices) + [len(itr)])
     start_indices = minibatch_indices[:-1]
     end_indices = minibatch_indices[1:]
     return zip(start_indices, end_indices)
 
 
+def convert_to_one_hot(itr, n_classes, dtype="int32"):
+    is_three_d = False
+    if type(itr) is np.ndarray:
+        if len(itr.shape) == 3:
+            is_three_d = True
+    elif not isinstance(itr[0], numbers.Real):
+        # Assume 3D list of list of list
+        # iterable of iterable of iterable, feature dim must be consistent
+        is_three_d = True
 
-
-def convert_to_one_hot(y, n_classes=None, dtype="int32"):
-    if n_classes is None:
-        calc_n_classes = len(set(y.ravel()))
+    if is_three_d:
+        lengths = [len(i) for i in itr]
+        one_hot = np.zeros((max(lengths), len(itr), n_classes), dtype=dtype)
+        for n in range(len(itr)):
+            one_hot[np.arange(lengths[n]), n, itr[n]] = 1
     else:
-        calc_n_classes = n_classes
-    one_hot = np.zeros((len(y), calc_n_classes), dtype=dtype)
-    one_hot[np.arange(len(y)), y] = 1
+        one_hot = np.zeros((len(itr), n_classes), dtype=dtype)
+        one_hot[np.arange(len(itr)), itr] = 1
     return one_hot
 
 
@@ -511,35 +520,32 @@ def make_minibatch(arg, start, stop):
     return [arg[start:stop]]
 
 
-def make_masked_minibatch(arg, start, stop):
-    """ Returns 3D minibatch and 3D mask """
-    if isinstance(arg[0][0], numbers.Real):
-        feature_dim = 1
-    else:
-        # iterable of iterable of iterable, feature dim must be consistent
-        feature_dim = len(arg[0][0])
-    sli = arg[start:stop]
-    lengths = np.array([len(l) for l in sli])
-    max_length = lengths.max()
-    minibatch = np.zeros((max_length, len(sli), feature_dim),
-                         dtype=theano.config.floatX)
-    mask = np.zeros((max_length, len(sli), 1), dtype="int32")
-    # Could do this faster...
-    for n in range(len(sli)):
-        # reshape hack to handle both cases of feature_dim = 1 and > 1
-        minibatch[:lengths[n], n, :] = np.array(sli[n]).reshape(len(sli[n]), -1)
-        mask[:lengths[n], n, :] = 1
-    return minibatch, mask
+def gen_text_minibatch_func(one_hot_size):
+    def apply(arg, start, stop):
+        sli = arg[start:stop]
+        expanded = convert_to_one_hot(sli, one_hot_size)
+        lengths = [len(s) for s in sli]
+        mask = np.zeros((max(lengths), len(sli)), dtype=theano.config.floatX)
+        for n, l in enumerate(lengths):
+            mask[np.arange(l), n] = 1.
+        return expanded, mask
+    return apply
 
 
 def iterate_function(func, list_of_args, minibatch_size,
                      list_of_non_minibatch_args=None,
-                     minibatch_function=make_minibatch,
+                     list_of_minibatch_functions=[make_minibatch],
                      list_of_output_names=None,
                      n_epochs=1000, n_status=50, status_func=None,
                      previous_epoch_results=None,
                      shuffle=False, random_state=None):
-    """ Minibatch args should come first """
+    """
+    Minibatch args should come first
+    If list_of_minbatch_functions is length 1, will be replicated to length of
+    list_of_args.
+
+    By far the craziest function in this library.
+    """
     if previous_epoch_results is None:
         epoch_results = defaultdict(list)
     else:
@@ -557,6 +563,11 @@ def iterate_function(func, list_of_args, minibatch_size,
     if len(list_of_args[0]) % minibatch_size != 0:
         print ("length of dataset should be evenly divisible by "
                "minibatch_size.")
+    if len(list_of_minibatch_functions) == 1:
+        list_of_minibatch_functions = list_of_minibatch_functions * len(
+            list_of_args)
+    else:
+        assert len(list_of_minibatch_functions) == len(list_of_args)
     # Function loop
     for e in range(n_epochs):
         results = defaultdict(list)
@@ -564,8 +575,8 @@ def iterate_function(func, list_of_args, minibatch_size,
             random_state.shuffle(indices)
         for i, j in indices:
             minibatch_args = []
-            for arg in list_of_args:
-                minibatch_args += minibatch_function(arg, i, j)
+            for n, arg in enumerate(list_of_args):
+                minibatch_args += list_of_minibatch_functions[n](arg, i, j)
             if list_of_non_minibatch_args is not None:
                 all_args = minibatch_args + list_of_non_minibatch_args
             else:
@@ -658,8 +669,13 @@ def make_shapename(name, shape):
 
 
 def parse_shapename(shapename):
-    # Bracket for scan
-    shape = shapename.split("_kdl_")[1].split("[")[0].split("x")
+    try:
+        # Bracket for scan
+        shape = shapename.split("_kdl_")[1].split("[")[0].split("x")
+    except AttributeError:
+        raise AttributeError("Unable to parse shapename. Has the expression "
+                             "been tagged with a shape by tag_expression? "
+                             " input shapename was %s" % shapename)
     if "[" in shapename.split("_kdl_")[1]:
         # inside scan
         shape = shape[1:]
@@ -762,7 +778,18 @@ def categorical_crossentropy_nll(predicted_values, true_values):
     """ Returns likelihood compared to one hot category labels """
     indices = tensor.argmax(true_values, axis=-1)
     rows = tensor.arange(true_values.shape[0])
-    return -tensor.log(predicted_values)[rows, indices]
+    if predicted_values.ndim < 3:
+        return -tensor.log(predicted_values)[rows, indices]
+    elif predicted_values.ndim == 3:
+        d0 = true_values.shape[0]
+        d1 = true_values.shape[1]
+        pred = predicted_values.reshape((d0 * d1, -1))
+        ind = indices.reshape((d0 * d1,))
+        s = tensor.arange(pred.shape[0])
+        correct = -tensor.log(pred)[s, ind]
+        return correct.reshape((d0, d1,))
+    else:
+        raise AttributeError("Tensor dim not supported")
 
 
 def abs_error_nll(predicted_values, true_values):
@@ -773,8 +800,8 @@ def squared_error_nll(predicted_values, true_values):
     return tensor.sqr(predicted_values - true_values).sum(axis=-1)
 
 
-def masked_squared_error_nll(predicted_values, mask, true_values):
-    return (tensor.sqr(predicted_values - true_values) * mask).sum(axis=-1)
+def masked_cost(cost, mask):
+    return cost * mask
 
 
 def softplus(X):
@@ -786,7 +813,10 @@ def relu(X):
 
 
 def softmax(X):
-    return tensor.nnet.softmax(X)
+    # should work for both 2D and 3D
+    e_X = tensor.exp(X - X.max(axis=-1, keepdims=True))
+    out = e_X / e_X.sum(axis=-1, keepdims=True)
+    return out
 
 
 def linear(X):
@@ -882,6 +912,23 @@ def softmax_layer(list_of_inputs, graph, name, proj_dim=None, random_state=None,
         list_of_inputs=list_of_inputs, graph=graph, name=name,
         proj_dim=proj_dim, random_state=random_state,
         strict=strict, init_func=init_func, func=softmax)
+
+
+def softmax_sample_layer(list_of_multinomial_inputs, name, random_state=None):
+    theano_seed = random_state.randint(-2147462579, 2147462579)
+    # Super edge case...
+    if theano_seed == 0:
+        print("WARNING: prior layer got 0 seed. Reseeding...")
+        theano_seed = random_state.randint(-2**32, 2**32)
+    theano_rng = MRG_RandomStreams(seed=theano_seed)
+    conc_multinomial = concatenate(list_of_multinomial_inputs, name, axis=1)
+    shape = expression_shape(conc_multinomial)
+    conc_multinomial /= len(list_of_multinomial_inputs)
+    tag_expression(conc_multinomial, name, shape)
+    samp = theano_rng.multinomial(pvals=conc_multinomial,
+                                  dtype="int32")
+    tag_expression(samp, name, (shape[0], shape[1]))
+    return samp
 
 
 def gaussian_sample_layer(list_of_mu_inputs, list_of_sigma_inputs,
@@ -1037,11 +1084,10 @@ def easy_tanh_recurrent(list_of_inputs, mask, hidden_dim, graph, name,
     h0_sym = as_shared(h0, name)
     tag_expression(h0_sym, name, (shape[1], hidden_dim))
 
-    def step(x_t, h_tm1, m_t):
+    def step(x_t, m_t, h_tm1):
         h_ti = tanh_recurrent_layer([x_t], [h_tm1], graph,
                                     name + '_easy_tanh_rec', random_state)
-        import ipdb; ipdb.set_trace()  # XXX BREAKPOINT
-        h_t = m_t * h_ti + (1 - m_t) * h_tm1
+        h_t = m_t[:, None] * h_ti + (1 - m_t)[:, None] * h_tm1
         return h_t
 
     if one_step:
@@ -1059,7 +1105,7 @@ def easy_tanh_recurrent(list_of_inputs, mask, hidden_dim, graph, name,
     else:
         # the hidden state `h` for the entire sequence
         h, updates = rnn_scan_wrap(step, name=name + '_easy_tanh_scan',
-                                   sequences=list_of_inputs,
+                                   sequences=list_of_inputs + [mask],
                                    outputs_info=[h0_sym])
     return h
 
@@ -1113,25 +1159,46 @@ def gru_recurrent_layer(list_of_inputs, list_of_hiddens, graph, name,
     return output
 
 
-def easy_gru_recurrent(list_of_inputs, hidden_dim, graph, name, random_state):
+def easy_gru_recurrent(list_of_inputs, mask, hidden_dim, graph, name,
+                       random_state, one_step=False):
     # an easy interface to lstm recurrent nets
     shape = expression_shape(list_of_inputs[0])
     # If the expressions are not the same length and batch size it won't work
-    raise ValueError("THESE NEED TO BE 2D!!!!")
-    # an easy interface to gru recurrent nets
-    h0 = np_zeros((hidden_dim,))
-    h0_sym = as_shared(h0, name)
-    tag_expression(h0_sym, name, (hidden_dim,))
+    max_ndim = max([inp.ndim for inp in list_of_inputs])
+    if max_ndim > 3:
+        raise ValueError("Input with ndim > 3 detected!")
+    elif max_ndim == 2:
+        # Simulate batch size 1
+        shape = (shape[0], 1, shape[1])
 
-    def step(x_t, h_tm1):
-        h_t = gru_recurrent_layer([x_t], [h_tm1], graph,
-                                  name + '_easy_gru_rec', random_state)
+    # an easy interface to tanh recurrent nets
+    h0 = np_zeros((shape[1], hidden_dim))
+    h0_sym = as_shared(h0, name)
+    tag_expression(h0_sym, name, (shape[1], hidden_dim))
+
+    def step(x_t, m_t, h_tm1):
+        h_ti = gru_recurrent_layer([x_t], [h_tm1], graph,
+                                   name + '_easy_gru_rec', random_state)
+        h_t = m_t[:, None] * h_ti + (1 - m_t)[:, None] * h_tm1
         return h_t
 
-    # the hidden state `h` for the entire sequence
-    h, updates = rnn_scan_wrap(step, name=name + '_easy_gru_scan',
-                               sequences=list_of_inputs,
-                               outputs_info=[h0_sym])
+    if one_step:
+        conc_input = concatenate(list_of_inputs, name + "_easy_gru_step",
+                                 axis=-1)
+        shape = expression_shape(conc_input)
+        sliced = conc_input[0]
+        tag_expression(sliced, name, shape[1:])
+        shape = expression_shape(mask)
+        mask_sliced = mask[0]
+        tag_expression(mask_sliced, name + "_mask", shape[1:])
+        h = step(sliced, h0_sym, mask_sliced)
+        shape = expression_shape(sliced)
+        tag_expression(h, name, shape)
+    else:
+        # the hidden state `h` for the entire sequence
+        h, updates = rnn_scan_wrap(step, name=name + '_easy_gru_scan',
+                                   sequences=list_of_inputs + [mask],
+                                   outputs_info=[h0_sym])
     return h
 
 
@@ -1191,27 +1258,51 @@ def lstm_recurrent_layer(list_of_inputs, list_of_hiddens, list_of_cells,
     return h, c
 
 
-def easy_lstm_recurrent(list_of_inputs, hidden_dim, graph, name, random_state):
+def easy_lstm_recurrent(list_of_inputs, mask, hidden_dim, graph, name,
+                        random_state, one_step=False):
     # an easy interface to lstm recurrent nets
     shape = expression_shape(list_of_inputs[0])
     # If the expressions are not the same length and batch size it won't work
-    raise ValueError("THESE NEED TO BE 2D!!!!")
-    h0 = np_zeros((hidden_dim,))
-    h0_sym = as_shared(h0, name)
-    tag_expression(h0_sym, name, (hidden_dim,))
-    c0 = np_zeros((hidden_dim,))
-    c0_sym = as_shared(c0, name)
-    tag_expression(c0_sym, name, (hidden_dim,))
+    max_ndim = max([inp.ndim for inp in list_of_inputs])
+    if max_ndim > 3:
+        raise ValueError("Input with ndim > 3 detected!")
+    elif max_ndim == 2:
+        # Simulate batch size 1
+        shape = (shape[0], 1, shape[1])
 
-    def step(x_t, h_tm1, c_tm1):
-        h_t, c_t = lstm_recurrent_layer([x_t], [h_tm1], [c_tm1], graph,
-                                        name + '_easy_lstm_rec', random_state)
+    # an easy interface to tanh recurrent nets
+    h0 = np_zeros((shape[1], hidden_dim))
+    h0_sym = as_shared(h0, name)
+    tag_expression(h0_sym, name, (shape[1], hidden_dim))
+
+    c0 = np_zeros((shape[1], hidden_dim))
+    c0_sym = as_shared(c0, name)
+    tag_expression(c0_sym, name, (shape[1], hidden_dim))
+
+    def step(x_t, m_t, h_tm1, c_tm1):
+        h_ti, c_ti = lstm_recurrent_layer([x_t], [h_tm1], [c_tm1], graph,
+                                          name + '_easy_lstm_rec', random_state)
+        h_t = m_t[:, None] * h_ti + (1 - m_t)[:, None] * h_tm1
+        c_t = m_t[:, None] * c_ti + (1 - m_t)[:, None] * c_tm1
         return h_t, c_t
 
-    # the hidden state `h` for the entire sequence
-    [h, c], _ = rnn_scan_wrap(step, name=name + '_easy_lstm_scan',
-                              sequences=list_of_inputs,
-                              outputs_info=[h0_sym, c0_sym])
+    if one_step:
+        conc_input = concatenate(list_of_inputs, name + "_easy_lstm_step",
+                                 axis=-1)
+        shape = expression_shape(conc_input)
+        sliced = conc_input[0]
+        tag_expression(sliced, name, shape[1:])
+        shape = expression_shape(mask)
+        mask_sliced = mask[0]
+        tag_expression(mask_sliced, name + "_mask", shape[1:])
+        h, c = step(sliced, h0_sym, c0_sym, mask_sliced)
+        shape = expression_shape(sliced)
+        tag_expression(h, name, shape)
+    else:
+        # the hidden state `h` for the entire sequence
+        [h, c], updates = rnn_scan_wrap(step, name=name + '_easy_lstm_scan',
+                                        sequences=list_of_inputs + [mask],
+                                        outputs_info=[h0_sym, c0_sym])
     return h
 
 
