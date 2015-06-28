@@ -458,11 +458,31 @@ def path_between_points(start, stop, n_steps=100, dtype=theano.config.floatX):
 
 
 def minibatch_indices(itr, minibatch_size):
-    minibatch_indices = np.arange(0, len(itr), minibatch_size)
-    minibatch_indices = np.asarray(list(minibatch_indices) + [len(itr)])
-    start_indices = minibatch_indices[:-1]
-    end_indices = minibatch_indices[1:]
-    return zip(start_indices, end_indices)
+    is_three_d = False
+    if type(itr) is np.ndarray:
+        if len(itr.shape) == 3:
+            is_three_d = True
+    elif not isinstance(itr[0], numbers.Real):
+        # Assume 3D list of list of list
+        # iterable of iterable of iterable, feature dim must be consistent
+        is_three_d = True
+
+    if is_three_d:
+        if type(itr) is np.ndarray:
+            minibatch_indices = np.arange(0, itr.shape[1], minibatch_size)
+        else:
+            # multi-list
+            minibatch_indices = np.arange(0, len(itr), minibatch_size)
+        minibatch_indices = np.asarray(list(minibatch_indices) + [len(itr)])
+        start_indices = minibatch_indices[:-1]
+        end_indices = minibatch_indices[1:]
+        return zip(start_indices, end_indices)
+    else:
+        minibatch_indices = np.arange(0, len(itr), minibatch_size)
+        minibatch_indices = np.asarray(list(minibatch_indices) + [len(itr)])
+        start_indices = minibatch_indices[:-1]
+        end_indices = minibatch_indices[1:]
+        return zip(start_indices, end_indices)
 
 
 def convert_to_one_hot(itr, n_classes, dtype="int32"):
@@ -517,7 +537,10 @@ def print_and_checkpoint_status_func(save_path, checkpoint_dict, epoch_results):
 
 def make_minibatch(arg, start, stop):
     """ Does not handle off-size minibatches """
-    return [arg[start:stop]]
+    if len(arg.shape) == 3:
+        return [arg[:, start:stop]]
+    else:
+        return [arg[start:stop]]
 
 
 def gen_text_minibatch_func(one_hot_size):
