@@ -535,6 +535,13 @@ def print_and_checkpoint_status_func(save_path, checkpoint_dict, epoch_results):
     print_status_func(epoch_results)
 
 
+def even_slice(arr, size):
+    extent = -(len(arr) % size)
+    if extent == 0:
+        extent = None
+    return arr[:extent]
+
+
 def make_minibatch(arg, start, stop):
     """ Does not handle off-size minibatches """
     if len(arg.shape) == 3:
