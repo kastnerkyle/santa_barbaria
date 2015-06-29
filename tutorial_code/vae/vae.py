@@ -64,7 +64,7 @@ else:
 
 
 def status_func(status_number, epoch_number, epoch_results):
-    print_and_checkpoint_status_func(save_path, checkpoint_dict, epoch_results)
+    checkpoint_status_func(save_path, checkpoint_dict, epoch_results)
 
 epoch_results = iterate_function(fit_function, [X], minibatch_size,
                                  list_of_output_names=["nll", "kl",

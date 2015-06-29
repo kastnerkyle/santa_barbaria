@@ -2,7 +2,7 @@ from kdl_template import *
 
 train, valid, test = fetch_binarized_mnist()
 X = train[0].astype(theano.config.floatX)
-y = convert_to_one_hot(train[1])
+y = convert_to_one_hot(train[1], n_classes=10)
 
 # graph holds information necessary to build layers from parents
 graph = OrderedDict()
@@ -35,7 +35,7 @@ x_l2_enc = softplus_layer([x_l1_enc], graph, 'x_l2_enc',  n_enc_layer[1],
 
 
 # combined q(y | x) and partial q(z | x) for q(z | y, x)
-l3_enc = softplus_layer([x_l2_enc, y_sym], graph, 'l3_enc', n_enc_layer[2],
+l3_enc = softplus_layer([x_l2_enc, y_pred], graph, 'l3_enc', n_enc_layer[2],
                         random_state)
 l4_enc = softplus_layer([l3_enc], graph, 'l4_enc', n_enc_layer[3],
                         random_state)
@@ -65,7 +65,7 @@ err = categorical_crossentropy_nll(y_pred, y_sym).mean()
 base_cost = -1 * (-nll - kl)
 
 # -log q(y | x) is nll already
-alpha = 0.1
+alpha = .1
 cost = base_cost + alpha * err
 
 params, grads = get_params_and_grads(graph, cost)
@@ -74,7 +74,7 @@ opt = adam(params)
 updates = opt.updates(params, grads, learning_rate)
 
 # Checkpointing
-save_path = "serialized_ss_vae.pkl"
+save_path = "serialized_cvae.pkl"
 if not os.path.exists(save_path):
     fit_function = theano.function([X_sym, y_sym], [nll, kl, nll + kl],
                                    updates=updates)
@@ -99,7 +99,7 @@ else:
 
 
 def status_func(status_number, epoch_number, epoch_results):
-    print_and_checkpoint_status_func(save_path, checkpoint_dict, epoch_results)
+    checkpoint_status_func(save_path, checkpoint_dict, epoch_results)
 
 epoch_results = iterate_function(fit_function, [X, y], minibatch_size,
                                  list_of_output_names=["nll", "kl", "cost"],

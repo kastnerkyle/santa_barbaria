@@ -4,6 +4,7 @@
 # See https://github.com/jych/cle for a library in this style
 import numpy as np
 from scipy import linalg
+from scipy.io import loadmat
 from functools import reduce
 import numbers
 import random
@@ -25,6 +26,9 @@ from collections import defaultdict
 
 
 class sgd(object):
+    """
+    Vanilla SGD
+    """
     def __init__(self, params):
         pass
 
@@ -37,6 +41,8 @@ class sgd(object):
 
 class sgd_nesterov(object):
     """
+    SGD with nesterov momentum
+
     Based on example from Yann D.
     """
     def __init__(self, params):
@@ -101,6 +107,9 @@ class rmsprop(object):
 
 
 class adagrad(object):
+    """
+    Adagrad optimizer
+    """
     def __init__(self, params):
         self.memory_ = [theano.shared(np.zeros_like(p.get_value()))
                         for p in params]
@@ -119,6 +128,8 @@ class adagrad(object):
 
 class adam(object):
     """
+    Adam optimizer
+
     Based on implementation from @NewMu / Alex Radford
     """
     def __init__(self, params):
@@ -150,6 +161,7 @@ class adam(object):
 
 
 def get_dataset_dir(dataset_name, data_dir=None, folder=None, create_dir=True):
+    """ Get dataset directory path """
     if not data_dir:
         data_dir = os.getenv("SANTA_BARBARIA_DATA", os.path.join(
             os.path.expanduser("~"), "santa_barbaria_data"))
@@ -201,18 +213,8 @@ def download(url, server_fname, local_fname=None, progress_update_percentage=5):
                 p += progress_update_percentage
 
 
-def check_fetch_lovecraft():
-    url = 'https://dl.dropboxusercontent.com/u/15378192/lovecraft_fiction.zip'
-    partial_path = get_dataset_dir("lovecraft")
-    full_path = os.path.join(partial_path, "lovecraft_fiction.zip")
-    if not os.path.exists(partial_path):
-        os.makedirs(partial_path)
-    if not os.path.exists(full_path):
-        download(url, full_path, progress_update_percentage=1)
-    return full_path
-
-
 def make_character_level_from_text(text):
+    """ Create mapping and inverse mappings for text -> one_hot_char """
     all_chars = reduce(lambda x, y: set(x) | set(y), text, set())
     mapper = {k: n + 2 for n, k in enumerate(list(all_chars))}
     # 1 is EOS
@@ -233,6 +235,52 @@ def make_character_level_from_text(text):
     return cleaned, mapper_func, inverse_mapper_func, mapper
 
 
+def check_fetch_uci_words():
+    """ Check for UCI vocabulary """
+    url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/bag-of-words/'
+    partial_path = get_dataset_dir("uci_words")
+    full_path = os.path.join(partial_path, "uci_words.zip")
+    if not os.path.exists(partial_path):
+        os.makedirs(partial_path)
+    if not os.path.exists(full_path):
+        # Download all 5 vocabularies and zip them into a file
+        all_vocabs = ['vocab.enron.txt', 'vocab.kos.txt', 'vocab.nips.txt',
+                      'vocab.nytimes.txt', 'vocab.pubmed.txt']
+        for vocab in all_vocabs:
+            dl_url = url + vocab
+            download(dl_url, full_path, progress_update_percentage=1)
+    return full_path
+
+
+def fetch_uci_words():
+    """ Returns UCI vocabulary text. """
+    raise ValueError("Not yet implemented")
+    data_path = check_fetch_lovecraft()
+    all_data = []
+    with zipfile.ZipFile(data_path, "r") as f:
+        for name in f.namelist():
+            if ".txt" not in name:
+                # Skip README
+                continue
+            data = f.read(name)
+            data = data.split("\n")
+            data = [l.strip() for l in data if l != ""]
+            all_data.extend(data)
+    return all_data
+
+
+def check_fetch_lovecraft():
+    """ Check for lovecraft data """
+    url = 'https://dl.dropboxusercontent.com/u/15378192/lovecraft_fiction.zip'
+    partial_path = get_dataset_dir("lovecraft")
+    full_path = os.path.join(partial_path, "lovecraft_fiction.zip")
+    if not os.path.exists(partial_path):
+        os.makedirs(partial_path)
+    if not os.path.exists(full_path):
+        download(url, full_path, progress_update_percentage=1)
+    return full_path
+
+
 def fetch_lovecraft():
     """ Returns lovecraft text. """
     data_path = check_fetch_lovecraft()
@@ -249,7 +297,47 @@ def fetch_lovecraft():
     return all_data
 
 
+def check_fetch_tfd():
+    """ Check that tfd faces are downloaded """
+    partial_path = get_dataset_dir("tfd")
+    full_path = os.path.join(partial_path, "TFD_48x48.mat")
+    if not os.path.exists(partial_path):
+        os.makedirs(partial_path)
+    if not os.path.exists(full_path):
+        raise ValueError("Put TFD_48x48 in %s" % str(partial_path))
+    return full_path
+
+
+def fetch_tfd():
+    """ Returns flattened 48x48 TFD faces with pixel values in [0 - 1] """
+    data_path = check_fetch_tfd()
+    matfile = loadmat(data_path)
+    all_data = matfile['images'].reshape(len(matfile['images']), -1) / 255.
+    return all_data
+
+
+def check_fetch_frey():
+    """ Check that frey faces are downloaded """
+    url = 'http://www.cs.nyu.edu/~roweis/data/frey_rawface.mat'
+    partial_path = get_dataset_dir("frey")
+    full_path = os.path.join(partial_path, "frey_rawface.mat")
+    if not os.path.exists(partial_path):
+        os.makedirs(partial_path)
+    if not os.path.exists(full_path):
+        download(url, full_path, progress_update_percentage=1)
+    return full_path
+
+
+def fetch_frey():
+    """ Returns flattened 20x28 frey faces with pixel values in [0 - 1] """
+    data_path = check_fetch_frey()
+    matfile = loadmat(data_path)
+    all_data = (matfile['ff'] / 255.).T
+    return all_data
+
+
 def check_fetch_mnist():
+    """ Check that mnist is downloaded. May need fixing for py3 compat """
     # py3k version is available at mnist_py3k.pkl.gz ... might need to fix
     url = 'http://www.iro.umontreal.ca/~lisa/deep/data/mnist/mnist.pkl.gz'
     partial_path = get_dataset_dir("mnist")
@@ -262,7 +350,7 @@ def check_fetch_mnist():
 
 
 def fetch_mnist():
-    """ Returns mnist digits with picel values in [0 - 1] """
+    """ Returns mnist digits with pixel values in [0 - 1] """
     data_path = check_fetch_mnist()
     f = gzip.open(data_path, 'rb')
     try:
@@ -298,6 +386,7 @@ def check_fetch_binarized_mnist():
 
 
 def fetch_binarized_mnist():
+    """ Get binarized version of MNIST data """
     train_set, valid_set, test_set = fetch_mnist()
     train_X = train_set[0]
     train_y = train_set[1]
@@ -344,6 +433,7 @@ def make_gif(arr, gif_name, plot_width, plot_height, list_text_per_frame=None,
              list_text_per_frame_color=None,
              delay=1, grayscale=False,
              loop=False, turn_on_agg=True):
+    """ Make a gif frmo a series of pngs using matplotlib matshow """
     if turn_on_agg:
         import matplotlib
         matplotlib.use('Agg')
@@ -410,7 +500,10 @@ def concatenate(tensor_list, name, axis=0, force_cast_to_float=True):
 
 
 def theano_repeat(arr, n_repeat, stretch=False):
-    """ Create repeats of 2D array using broadcasting. """
+    """
+    Create repeats of 2D array using broadcasting.
+    Shape[0] incorrect after this node!
+    """
     if arr.dtype not in ["float32", "float64"]:
         arr = tensor.cast(arr, "int32")
     if stretch:
@@ -431,7 +524,7 @@ def theano_repeat(arr, n_repeat, stretch=False):
 
 
 def cast_to_float(list_of_inputs):
-    # preserve name and shape info after cast
+    """ A cast that preserves name and shape info after cast """
     input_names = [inp.name for inp in list_of_inputs]
     cast_inputs = [tensor.cast(inp, theano.config.floatX)
                    for inp in list_of_inputs]
@@ -441,6 +534,7 @@ def cast_to_float(list_of_inputs):
 
 
 def interpolate_between_points(arr, n_steps=50):
+    """ Helper function for drawing line between points in space """
     assert len(arr) > 2
     assert n_steps > 1
     path = [path_between_points(start, stop, n_steps=n_steps)
@@ -450,6 +544,7 @@ def interpolate_between_points(arr, n_steps=50):
 
 
 def path_between_points(start, stop, n_steps=100, dtype=theano.config.floatX):
+    """ Helper function for making a line between points in ND space """
     assert n_steps > 1
     step_vector = 1. / (n_steps - 1) * (stop - start)
     steps = np.arange(0, n_steps)[:, None] * np.ones((n_steps, len(stop)))
@@ -458,6 +553,7 @@ def path_between_points(start, stop, n_steps=100, dtype=theano.config.floatX):
 
 
 def minibatch_indices(itr, minibatch_size):
+    """ Generate indices for slicing 2D and 3D arrays in minibatches"""
     is_three_d = False
     if type(itr) is np.ndarray:
         if len(itr.shape) == 3:
@@ -486,6 +582,7 @@ def minibatch_indices(itr, minibatch_size):
 
 
 def convert_to_one_hot(itr, n_classes, dtype="int32"):
+    """ Convert 2D or 3D iterators to one_hot. Primarily for text. """
     is_three_d = False
     if type(itr) is np.ndarray:
         if len(itr.shape) == 3:
@@ -507,6 +604,7 @@ def convert_to_one_hot(itr, n_classes, dtype="int32"):
 
 
 def save_checkpoint(save_path, items_dict):
+    """ Simple wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
     with open(save_path, mode="wb") as f:
@@ -515,6 +613,7 @@ def save_checkpoint(save_path, items_dict):
 
 
 def load_checkpoint(save_path):
+    """ Simple pickle wrapper for checkpoint dictionaries """
     old_recursion_limit = sys.getrecursionlimit()
     sys.setrecursionlimit(40000)
     with open(save_path, mode="rb") as f:
@@ -524,18 +623,52 @@ def load_checkpoint(save_path):
 
 
 def print_status_func(epoch_results):
-    n_epochs_seen = len(epoch_results.values()[0])
+    """ Print the last results from a results dictionary """
+    n_epochs_seen = max([len(l) for l in epoch_results.values()])
     last_results = {k: v[-1] for k, v in epoch_results.items()}
     print("Epoch %i: %s" % (n_epochs_seen, last_results))
 
 
-def print_and_checkpoint_status_func(save_path, checkpoint_dict, epoch_results):
+def checkpoint_status_func(save_path, checkpoint_dict, epoch_results):
+    """ Saves a checkpoint dict """
     checkpoint_dict["previous_epoch_results"] = epoch_results
     save_checkpoint(save_path, checkpoint_dict)
     print_status_func(epoch_results)
 
 
+def early_stopping_status_func(valid_cost, save_path, checkpoint_dict,
+                               epoch_results):
+    """
+    Adds valid_cost to epoch_results and saves model if best valid
+    Assumes checkpoint_dict is a defaultdict(list)
+
+    Example usage for early stopping on validation set:
+
+    def status_func(status_number, epoch_number, epoch_results):
+        valid_results = iterate_function(
+            cost_function, [X_clean_valid, y_clean_valid], minibatch_size,
+            list_of_output_names=["valid_cost"],
+            list_of_minibatch_functions=[text_minibatcher], n_epochs=1,
+            shuffle=False)
+        early_stopping_status_func(valid_results["valid_cost"][-1],
+                                save_path, checkpoint_dict, epoch_results)
+
+    status_func can then be fed to iterate_function for training with early
+    stopping.
+    """
+    # Quick trick to avoid 0 length list
+    old = min(epoch_results["valid_cost"] + [np.inf])
+    epoch_results["valid_cost"].append(valid_cost)
+    new = min(epoch_results["valid_cost"])
+    if new < old:
+        print("Saving checkpoint based on validation score")
+        checkpoint_status_func(save_path, checkpoint_dict, epoch_results)
+    else:
+        print_status_func(epoch_results)
+
+
 def even_slice(arr, size):
+    """ Force array to be even by slicing off the end """
     extent = -(len(arr) % size)
     if extent == 0:
         extent = None
@@ -551,6 +684,20 @@ def make_minibatch(arg, start, stop):
 
 
 def gen_text_minibatch_func(one_hot_size):
+    """
+    Returns a function that will turn a text minibatch into one_hot form.
+
+    For use with iterate_function list_of_minibatch_functions argument.
+
+    Example:
+    n_chars = 84
+    text_minibatcher = gen_text_minibatch_func(n_chars)
+    valid_results = iterate_function(
+        cost_function, [X_clean_valid, y_clean_valid], minibatch_size,
+        list_of_output_names=["valid_cost"],
+        list_of_minibatch_functions=[text_minibatcher], n_epochs=1,
+        shuffle=False)
+    """
     def apply(arg, start, stop):
         sli = arg[start:stop]
         expanded = convert_to_one_hot(sli, one_hot_size)
@@ -562,7 +709,7 @@ def gen_text_minibatch_func(one_hot_size):
     return apply
 
 
-def iterate_function(func, list_of_args, minibatch_size,
+def iterate_function(func, list_of_minibatch_args, minibatch_size,
                      list_of_non_minibatch_args=None,
                      list_of_minibatch_functions=[make_minibatch],
                      list_of_output_names=None,
@@ -570,11 +717,51 @@ def iterate_function(func, list_of_args, minibatch_size,
                      previous_epoch_results=None,
                      shuffle=False, random_state=None):
     """
-    Minibatch args should come first
-    If list_of_minbatch_functions is length 1, will be replicated to length of
-    list_of_args.
+    Minibatch arguments should come first.
 
-    By far the craziest function in this library.
+    Constant arguments which should not be iterated can be passed as
+    list_of_non_minibatch_args.
+
+    If list_of_minbatch_functions is length 1, will be replicated to length of
+    list_of_args - applying the same function to all minibatch arguments in
+    list_of_args. Otherwise, this should be the same length as list_of_args
+
+    list_of_output_names simply names the output of the passed in function.
+    Should be the same length as the number of outputs from the function.
+
+    status_func is a function run periodically (based on n_status_points),
+    which allows for validation, early stopping, checkpointing, etc.
+
+    previous_epoch_results allows for continuing from saved checkpoints
+
+    shuffle and random_state are used to determine if minibatches are run
+    in sequence or selected randomly each epoch.
+
+    By far the craziest function in this file.
+
+    Example validation function:
+    n_chars = 84
+    text_minibatcher = gen_text_minibatch_func(n_chars)
+
+    cost_function returns one value, the cost for that minibatch
+
+    valid_results = iterate_function(
+        cost_function, [X_clean_valid, y_clean_valid], minibatch_size,
+        list_of_output_names=["valid_cost"],
+        list_of_minibatch_functions=[text_minibatcher], n_epochs=1,
+        shuffle=False)
+
+    Example training loop:
+
+    fit_function returns 3 values, nll, kl and the total cost
+
+    epoch_results = iterate_function(fit_function, [X, y], minibatch_size,
+                                 list_of_output_names=["nll", "kl", "cost"],
+                                 n_epochs=2000,
+                                 status_func=status_func,
+                                 previous_epoch_results=previous_epoch_results,
+                                 shuffle=True,
+                                 random_state=random_state)
     """
     if previous_epoch_results is None:
         epoch_results = defaultdict(list)
@@ -584,20 +771,24 @@ def iterate_function(func, list_of_args, minibatch_size,
     if shuffle:
         assert random_state is not None
     status_points = list(range(n_epochs))
-    status_points = status_points[::n_epochs // n_status] + [status_points[-1]]
+    if len(status_points) >= n_status:
+        intermediate_points = status_points[::n_epochs // n_status]
+        status_points = intermediate_points + [status_points[-1]]
+    else:
+        status_points = range(len(status_points))
 
-    for arg in list_of_args:
-        assert len(arg) == len(list_of_args[0])
+    for arg in list_of_minibatch_args:
+        assert len(arg) == len(list_of_minibatch_args[0])
 
-    indices = minibatch_indices(list_of_args[0], minibatch_size)
-    if len(list_of_args[0]) % minibatch_size != 0:
+    indices = minibatch_indices(list_of_minibatch_args[0], minibatch_size)
+    if len(list_of_minibatch_args[0]) % minibatch_size != 0:
         print ("length of dataset should be evenly divisible by "
                "minibatch_size.")
     if len(list_of_minibatch_functions) == 1:
         list_of_minibatch_functions = list_of_minibatch_functions * len(
-            list_of_args)
+            list_of_minibatch_args)
     else:
-        assert len(list_of_minibatch_functions) == len(list_of_args)
+        assert len(list_of_minibatch_functions) == len(list_of_minibatch_args)
     # Function loop
     for e in range(n_epochs):
         results = defaultdict(list)
@@ -605,7 +796,7 @@ def iterate_function(func, list_of_args, minibatch_size,
             random_state.shuffle(indices)
         for i, j in indices:
             minibatch_args = []
-            for n, arg in enumerate(list_of_args):
+            for n, arg in enumerate(list_of_minibatch_args):
                 minibatch_args += list_of_minibatch_functions[n](arg, i, j)
             if list_of_non_minibatch_args is not None:
                 all_args = minibatch_args + list_of_non_minibatch_args
@@ -830,6 +1021,20 @@ def squared_error_nll(predicted_values, true_values):
     return tensor.sqr(predicted_values - true_values).sum(axis=-1)
 
 
+def gaussian_error_nll(mu_values, sigma_values, true_values):
+    """ sigma should come from a softplus layer """
+    nll = 0.5 * (mu_values - true_values) ** 2 / sigma_values ** 2 + tensor.log(
+        2 * np.pi * sigma_values ** 2)
+    return nll
+
+
+def log_gaussian_error_nll(mu_values, log_sigma_values, true_values):
+    """ log_sigma should come from a linear layer """
+    nll = 0.5 * (mu_values - true_values) ** 2 / tensor.exp(
+        log_sigma_values) ** 2 + tensor.log(2 * np.pi) + 2 * log_sigma_values
+    return nll
+
+
 def masked_cost(cost, mask):
     return cost * mask
 
@@ -842,6 +1047,10 @@ def relu(X):
     return X * (X > 1)
 
 
+def linear(X):
+    return X
+
+
 def softmax(X):
     # should work for both 2D and 3D
     e_X = tensor.exp(X - X.max(axis=-1, keepdims=True))
@@ -849,8 +1058,43 @@ def softmax(X):
     return out
 
 
-def linear(X):
+def dropout(X, random_state, on_off_switch, p=0.):
+    if p > 0:
+        theano_seed = random_state.randint(-2147462579, 2147462579)
+        # Super edge case...
+        if theano_seed == 0:
+            print("WARNING: prior layer got 0 seed. Reseeding...")
+            theano_seed = random_state.randint(-2**32, 2**32)
+        theano_rng = MRG_RandomStreams(seed=theano_seed)
+        retain_prob = 1 - p
+        if X.ndim == 2:
+            X *= theano_rng.binomial(
+                X.shape, p=retain_prob,
+                dtype=theano.config.floatX) ** on_off_switch
+            X /= retain_prob
+        elif X.ndim == 3:
+            # Dropout for recurrent - don't drop over time!
+            X *= theano_rng.binomial((
+                X.shape[1], X.shape[2]), p=retain_prob,
+                dtype=theano.config.floatX) ** on_off_switch
+            X /= retain_prob
+        else:
+            raise ValueError("Unsupported tensor with ndim %s" % str(X.ndim))
     return X
+
+
+def dropout_layer(list_of_inputs, name, on_off_switch, dropout_prob=0.5,
+                  random_state=None):
+    theano_seed = random_state.randint(-2147462579, 2147462579)
+    # Super edge case...
+    if theano_seed == 0:
+        print("WARNING: prior layer got 0 seed. Reseeding...")
+        theano_seed = random_state.randint(-2**32, 2**32)
+    conc_input = concatenate(list_of_inputs, name, axis=-1)
+    shape = expression_shape(conc_input)
+    dropped = dropout(conc_input, random_state, on_off_switch, p=dropout_prob)
+    tag_expression(dropped, name, shape)
+    return dropped
 
 
 def projection_layer(list_of_inputs, graph, name, proj_dim=None,
